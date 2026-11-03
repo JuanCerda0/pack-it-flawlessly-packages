@@ -14,6 +14,8 @@ The API listens on port `8080` by default. Flyway creates the `packages` and `pa
 
 Use `./mvnw test` to run the PostgreSQL integration tests. Tests replace the JWT decoder only in the test context, so they do not need to contact Cognito; runtime authorization is unchanged. Set `PACKIT_DB_URL`, `PACKIT_DB_USERNAME`, and `PACKIT_DB_PASSWORD` as needed for other PostgreSQL locations.
 
+Flyway also creates `outbox_events`. Package changes and their pending messages are saved in one transaction; transitions to `PREPARING` and `READY` add document jobs. See [message contracts](docs/message-contracts.md). Publishing to RabbitMQ is the next step and is not active yet.
+
 The Cognito issuer and CORS origins can be changed with `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` and `PACKIT_CORS_ALLOWED_ORIGINS`. The latter accepts a comma-separated list; local development defaults to `http://localhost:4200`.
 
 ## API routes
