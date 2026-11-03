@@ -1,5 +1,6 @@
 package dev.noby.packit.outbox;
 
+import dev.noby.packit.config.RabbitTopologyConfig;
 import dev.noby.packit.entity.PackageEntity;
 import dev.noby.packit.entity.PackageItemEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,9 +20,6 @@ import java.util.UUID;
 
 @Service
 public class OutboxMessageService {
-
-    private static final String HISTORY_EXCHANGE = "packit.package.events";
-    private static final String DOCUMENT_EXCHANGE = "packit.document.commands";
 
     private final JdbcTemplate jdbcTemplate;
     private final JsonMapper jsonMapper;
@@ -65,7 +63,7 @@ public class OutboxMessageService {
         message.put("actorId", actorId());
         message.put("before", before);
         message.put("after", after);
-        insert(eventId, HISTORY_EXCHANGE, type.routingKey, message, now);
+        insert(eventId, RabbitTopologyConfig.HISTORY_EXCHANGE, type.routingKey, message, now);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -80,7 +78,7 @@ public class OutboxMessageService {
         snapshot.put("status", packageEntity.getStatus().name());
         snapshot.put("items", packageEntity.getItems().stream().map(this::itemSnapshot).toList());
         message.put("package", snapshot);
-        insert(eventId, DOCUMENT_EXCHANGE, type.routingKey, message, now);
+        insert(eventId, RabbitTopologyConfig.DOCUMENT_EXCHANGE, type.routingKey, message, now);
     }
 
     public Map<String, Object> packageDetails(PackageEntity packageEntity) {
