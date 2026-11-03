@@ -8,6 +8,10 @@ import dev.noby.packit.exception.InvalidPackageStatusTransitionException;
 import dev.noby.packit.exception.PackageItemNotFoundException;
 import dev.noby.packit.exception.PackageNotFoundException;
 import dev.noby.packit.mapper.PackageMapper;
+import dev.noby.packit.outbox.OutboxMessageService;
+import dev.noby.packit.outbox.OutboxMessageService.DocumentType;
+import dev.noby.packit.outbox.OutboxMessageService.HistoryType;
+import dev.noby.packit.repository.PackageItemRepository;
 import dev.noby.packit.repository.PackageRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,11 +25,17 @@ import java.util.Map;
 public class PackageService {
 
     private final PackageRepository packageRepository;
+    private final PackageItemRepository packageItemRepository;
     private final PackageMapper packageMapper;
+    private final OutboxMessageService outboxMessageService;
 
-    public PackageService(PackageRepository packageRepository, PackageMapper packageMapper) {
+    public PackageService(PackageRepository packageRepository, PackageItemRepository packageItemRepository,
+                          PackageMapper packageMapper,
+                          OutboxMessageService outboxMessageService) {
         this.packageRepository = packageRepository;
+        this.packageItemRepository = packageItemRepository;
         this.packageMapper = packageMapper;
+        this.outboxMessageService = outboxMessageService;
     }
 
     public List<PackageResponse> getPackages(PackageStatus status) {
@@ -43,14 +53,21 @@ public class PackageService {
     public PackageResponse createPackage(PackageCreateRequest request) {
         PackageEntity entity = new PackageEntity(request.name().trim(), normalize(request.reference()),
                 normalize(request.description()));
-        return packageMapper.toResponse(packageRepository.save(entity));
+        packageRepository.save(entity);
+        Map<String, Object> after = outboxMessageService.packageDetails(entity);
+        after.put("status", entity.getStatus().name());
+        outboxMessageService.recordHistory(entity, HistoryType.PACKAGE_CREATED, null, after);
+        return packageMapper.toResponse(entity);
     }
 
     @Transactional
     public PackageResponse updatePackage(Long id, PackageUpdateRequest request) {
         PackageEntity entity = findPackage(id);
         ensureNotArchived(entity);
+        Map<String, Object> before = outboxMessageService.packageDetails(entity);
         entity.updateDetails(request.name().trim(), normalize(request.reference()), normalize(request.description()));
+        outboxMessageService.recordHistory(entity, HistoryType.PACKAGE_UPDATED, before,
+                outboxMessageService.packageDetails(entity));
         return packageMapper.toResponse(entity);
     }
 
@@ -62,6 +79,13 @@ public class PackageService {
             throw new InvalidPackageStatusTransitionException(currentStatus, requestedStatus);
         }
         entity.changeStatus(requestedStatus);
+        outboxMessageService.recordHistory(entity, HistoryType.PACKAGE_STATUS_CHANGED,
+                Map.of("status", currentStatus.name()), Map.of("status", requestedStatus.name()));
+        if (requestedStatus == PackageStatus.PREPARING) {
+            outboxMessageService.recordDocument(entity, DocumentType.INTAKE);
+        } else if (requestedStatus == PackageStatus.READY) {
+            outboxMessageService.recordDocument(entity, DocumentType.DISPATCH);
+        }
         return packageMapper.toResponse(entity);
     }
 
@@ -72,7 +96,9 @@ public class PackageService {
         PackageItemEntity item = new PackageItemEntity(normalize(request.sku()), request.productName().trim(),
                 request.quantity());
         packageEntity.addItem(item);
-        packageRepository.save(packageEntity);
+        packageItemRepository.saveAndFlush(item);
+        outboxMessageService.recordHistory(packageEntity, HistoryType.PACKAGE_ITEM_ADDED, null,
+                outboxMessageService.itemDetails(item));
         return packageMapper.toItemResponse(item);
     }
 
@@ -82,7 +108,10 @@ public class PackageService {
         ensureNotArchived(packageEntity);
         PackageItemEntity item = packageEntity.findItem(itemId)
                 .orElseThrow(() -> new PackageItemNotFoundException(packageId, itemId));
+        Map<String, Object> before = outboxMessageService.itemDetails(item);
         item.update(normalize(request.sku()), request.productName().trim(), request.quantity());
+        outboxMessageService.recordHistory(packageEntity, HistoryType.PACKAGE_ITEM_UPDATED, before,
+                outboxMessageService.itemDetails(item));
         return packageMapper.toItemResponse(item);
     }
 
