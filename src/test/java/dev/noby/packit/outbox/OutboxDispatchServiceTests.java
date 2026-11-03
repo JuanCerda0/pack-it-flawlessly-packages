@@ -30,7 +30,7 @@ import static org.mockito.Mockito.verify;
 
 @SpringBootTest(properties = {
         "packit.outbox.publisher.enabled=false",
-        "packit.outbox.publisher.batch-size=1"
+        "packit.outbox.publisher.batch-size=2"
 })
 @Transactional
 class OutboxDispatchServiceTests {
@@ -116,6 +116,30 @@ class OutboxDispatchServiceTests {
         assertNull(jdbcTemplate.queryForObject(
                 "SELECT last_error FROM outbox_events WHERE payload ->> 'packageId' = ?",
                 String.class, created.id().toString()));
+    }
+
+    @Test
+    void unroutableMessageDoesNotBlockNextMessage() {
+        AtomicInteger sends = new AtomicInteger();
+        doAnswer(call -> {
+            Message message = call.getArgument(2);
+            CorrelationData correlation = call.getArgument(3);
+            if (sends.incrementAndGet() == 1) {
+                correlation.setReturned(new ReturnedMessage(message, 312, "NO_ROUTE",
+                        call.getArgument(0), call.getArgument(1)));
+            }
+            correlation.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(rabbitTemplate).send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
+
+        PackageResponse first = packageService.createPackage(
+                new PackageCreateRequest("Primero", "FIRST-TEST", null));
+        PackageResponse second = packageService.createPackage(
+                new PackageCreateRequest("Segundo", "SECOND-TEST", null));
+
+        assertEquals(1, dispatchService.publishBatch());
+        assertEquals(0, countPublished(first.id()));
+        assertEquals(1, countPublished(second.id()));
     }
 
     private Message captureSentMessage() {

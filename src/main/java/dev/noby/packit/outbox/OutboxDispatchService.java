@@ -41,7 +41,7 @@ public class OutboxDispatchService {
         List<PendingMessage> pending = jdbcTemplate.query(
                 "SELECT event_id, exchange_name, routing_key, payload::text AS payload "
                         + "FROM outbox_events WHERE published_at IS NULL "
-                        + "ORDER BY created_at, event_id LIMIT ? FOR UPDATE SKIP LOCKED",
+                        + "ORDER BY attempt_count, created_at, event_id LIMIT ? FOR UPDATE SKIP LOCKED",
                 (rs, row) -> new PendingMessage((UUID) rs.getObject("event_id"),
                         rs.getString("exchange_name"), rs.getString("routing_key"), rs.getString("payload")),
                 batchSize);
@@ -60,7 +60,10 @@ public class OutboxDispatchService {
                                 + "WHERE event_id = ?",
                         reason, message.eventId());
                 log.warn("Outbox message {} remains pending: {}", message.eventId(), reason);
-                break;
+                if (!(error instanceof UnroutableMessageException)) {
+                    break;
+                }
+                continue;
             }
             jdbcTemplate.update(
                     "UPDATE outbox_events SET published_at = clock_timestamp(), "
@@ -86,8 +89,14 @@ public class OutboxDispatchService {
             throw new IllegalStateException("RabbitMQ rejected publication: " + confirm.getReason());
         }
         if (correlation.getReturned() != null) {
-            throw new IllegalStateException("RabbitMQ could not route message: "
+            throw new UnroutableMessageException("RabbitMQ could not route message: "
                     + correlation.getReturned().getReplyText());
+        }
+    }
+
+    private static class UnroutableMessageException extends IllegalStateException {
+        private UnroutableMessageException(String message) {
+            super(message);
         }
     }
 
