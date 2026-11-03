@@ -49,4 +49,4 @@ Los cuerpos son JSON UTF-8. `eventId` es un UUID único por mensaje; los consumi
 }
 ```
 
-Cada mensaje se guarda en `outbox_events` en la misma transacción que el cambio del paquete. Su publicación y la confirmación de enrutamiento se implementan por separado; el contrato no exige que el consumidor reciba los mensajes en orden.
+Cada mensaje se guarda en `outbox_events` en la misma transacción que el cambio del paquete. El publicador lo envía con confirmación de recepción y enrutamiento; si no obtiene ambas, conserva la fila pendiente para reintento. El contrato no exige que el consumidor reciba los mensajes en orden ni excluye duplicados tras una falla entre la confirmación y el registro en PostgreSQL; los consumidores deduplicarán por `eventId`.

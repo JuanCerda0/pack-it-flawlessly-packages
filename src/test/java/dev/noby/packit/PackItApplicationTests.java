@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
-@SpringBootTest
+@SpringBootTest(properties = "packit.outbox.publisher.enabled=false")
 class PackItApplicationTests {
 
     @MockitoBean

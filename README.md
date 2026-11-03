@@ -14,7 +14,11 @@ The API listens on port `8080` by default. Flyway creates the `packages` and `pa
 
 Use `./mvnw test` to run the PostgreSQL integration tests. Tests replace the JWT decoder only in the test context, so they do not need to contact Cognito; runtime authorization is unchanged. Set `PACKIT_DB_URL`, `PACKIT_DB_USERNAME`, and `PACKIT_DB_PASSWORD` as needed for other PostgreSQL locations.
 
-Flyway also creates `outbox_events`. Package changes and their pending messages are saved in one transaction; transitions to `PREPARING` and `READY` add document jobs. See [message contracts](docs/message-contracts.md). Publishing to RabbitMQ is the next step and is not active yet.
+Flyway also creates `outbox_events`. Package changes and their pending messages are saved in one transaction; transitions to `PREPARING` and `READY` add document jobs. See [message contracts](docs/message-contracts.md).
+
+Start RabbitMQ locally before running the API. On the first RabbitMQ connection, Spring declares the durable classic work queues, their DLQs, and the exchanges and bindings. Every five seconds, the outbox publisher sends pending messages as persistent JSON. It marks a row published only after a broker confirmation and successful routing; connection failures or unroutable messages remain pending for retry. The API can still start while RabbitMQ is unavailable. The current stage has no consumers, so published messages stay in their queues.
+
+The default broker connection is `localhost:5672` with RabbitMQ's local `guest` account. Override `PACKIT_RABBITMQ_HOST`, `PACKIT_RABBITMQ_PORT`, `PACKIT_RABBITMQ_USERNAME`, and `PACKIT_RABBITMQ_PASSWORD` for another broker. `PACKIT_OUTBOX_PUBLISH_DELAY_MS`, `PACKIT_OUTBOX_BATCH_SIZE`, and `PACKIT_OUTBOX_CONFIRM_TIMEOUT_MS` tune the publisher. Run `./mvnw -q -Dpackit.rabbit.integration=true -Dtest=OutboxRabbitIntegrationTest test` to verify confirms, routing, and retry against a running local RabbitMQ; the normal test suite does not require it.
 
 The Cognito issuer and CORS origins can be changed with `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` and `PACKIT_CORS_ALLOWED_ORIGINS`. The latter accepts a comma-separated list; local development defaults to `http://localhost:4200`.
 
