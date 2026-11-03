@@ -3,6 +3,7 @@ target/
 *.mv.db
 *.trace.db
 packit-db*
+.env.local
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
@@ -15,6 +16,10 @@ packit-db*
 .settings
 .springBeans
 .sts4-cache
+.metadata/
+.jdtls/
+.recommenders/
+bin/
 
 ### IntelliJ IDEA ###
 .idea
