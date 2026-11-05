@@ -4,6 +4,7 @@ target/
 *.trace.db
 packit-db*
 .env.local
+.env.compose
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
