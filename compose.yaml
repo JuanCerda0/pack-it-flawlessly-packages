@@ -1,0 +1,188 @@
+name: packit-local
+
+services:
+  rabbit1:
+    image: rabbitmq:4.1-management
+    hostname: rabbit1
+    environment:
+      RABBITMQ_NODENAME: rabbit@rabbit1
+      RABBITMQ_ERLANG_COOKIE: ${PACKIT_COMPOSE_RABBIT_COOKIE:?Set PACKIT_COMPOSE_RABBIT_COOKIE}
+      RABBITMQ_DEFAULT_USER: ${PACKIT_COMPOSE_RABBIT_USER:?Set PACKIT_COMPOSE_RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${PACKIT_COMPOSE_RABBIT_PASSWORD:?Set PACKIT_COMPOSE_RABBIT_PASSWORD}
+    ports:
+      - "127.0.0.1:${PACKIT_RABBIT1_AMQP_PORT:-5673}:5672"
+      - "127.0.0.1:${PACKIT_RABBIT1_UI_PORT:-15673}:15672"
+    volumes:
+      - rabbit1_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  rabbit2:
+    image: rabbitmq:4.1-management
+    hostname: rabbit2
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+    environment:
+      RABBITMQ_NODENAME: rabbit@rabbit2
+      RABBITMQ_ERLANG_COOKIE: ${PACKIT_COMPOSE_RABBIT_COOKIE:?Set PACKIT_COMPOSE_RABBIT_COOKIE}
+      RABBITMQ_DEFAULT_USER: ${PACKIT_COMPOSE_RABBIT_USER:?Set PACKIT_COMPOSE_RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${PACKIT_COMPOSE_RABBIT_PASSWORD:?Set PACKIT_COMPOSE_RABBIT_PASSWORD}
+    ports:
+      - "127.0.0.1:${PACKIT_RABBIT2_AMQP_PORT:-5674}:5672"
+      - "127.0.0.1:${PACKIT_RABBIT2_UI_PORT:-15674}:15672"
+    volumes:
+      - rabbit2_data:/var/lib/rabbitmq
+      - ./infra/rabbitmq/rabbit2.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmqctl cluster_status | grep -q 'rabbit@rabbit1'"]
+      interval: 10s
+      timeout: 15s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  postgres-packages:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PACKIT_COMPOSE_DB_PASSWORD:?Set PACKIT_COMPOSE_DB_PASSWORD}
+      POSTGRES_DB: packit_packages
+    ports:
+      - "127.0.0.1:${PACKIT_PACKAGES_DB_PORT:-5433}:5432"
+    volumes:
+      - packages_db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d packit_packages"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  postgres-history:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PACKIT_COMPOSE_DB_PASSWORD:?Set PACKIT_COMPOSE_DB_PASSWORD}
+      POSTGRES_DB: packit_history
+    ports:
+      - "127.0.0.1:${PACKIT_HISTORY_DB_PORT:-5434}:5432"
+    volumes:
+      - history_db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d packit_history"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  postgres-documents:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PACKIT_COMPOSE_DB_PASSWORD:?Set PACKIT_COMPOSE_DB_PASSWORD}
+      POSTGRES_DB: packit_documents
+    ports:
+      - "127.0.0.1:${PACKIT_DOCUMENTS_DB_PORT:-5435}:5432"
+    volumes:
+      - documents_db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d packit_documents"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  packages:
+    build:
+      context: .
+    environment:
+      PORT: 8080
+      PACKIT_DB_URL: jdbc:postgresql://postgres-packages:5432/packit_packages
+      PACKIT_DB_USERNAME: postgres
+      PACKIT_DB_PASSWORD: ${PACKIT_COMPOSE_DB_PASSWORD:?Set PACKIT_COMPOSE_DB_PASSWORD}
+      PACKIT_RABBITMQ_HOST: rabbit1
+      PACKIT_RABBITMQ_USERNAME: ${PACKIT_COMPOSE_RABBIT_USER:?Set PACKIT_COMPOSE_RABBIT_USER}
+      PACKIT_RABBITMQ_PASSWORD: ${PACKIT_COMPOSE_RABBIT_PASSWORD:?Set PACKIT_COMPOSE_RABBIT_PASSWORD}
+      COGNITO_ISSUER_URI: ${COGNITO_ISSUER_URI:-https://cognito-idp.us-east-1.amazonaws.com/us-east-1_vidDVo9o0}
+    ports:
+      - "${PACKIT_API_BIND_ADDRESS:-127.0.0.1}:${PACKIT_PACKAGES_API_PORT:-8080}:8080"
+    depends_on:
+      postgres-packages:
+        condition: service_healthy
+      rabbit2:
+        condition: service_healthy
+    restart: unless-stopped
+
+  history:
+    build:
+      context: ../pack-it-flawlessly-history
+    environment:
+      PORT: 8082
+      HISTORY_DB_URL: jdbc:postgresql://postgres-history:5432/packit_history
+      HISTORY_DB_USERNAME: postgres
+      HISTORY_DB_PASSWORD: ${PACKIT_COMPOSE_DB_PASSWORD:?Set PACKIT_COMPOSE_DB_PASSWORD}
+      HISTORY_RABBITMQ_HOST: rabbit1
+      HISTORY_RABBITMQ_USERNAME: ${PACKIT_COMPOSE_RABBIT_USER:?Set PACKIT_COMPOSE_RABBIT_USER}
+      HISTORY_RABBITMQ_PASSWORD: ${PACKIT_COMPOSE_RABBIT_PASSWORD:?Set PACKIT_COMPOSE_RABBIT_PASSWORD}
+      COGNITO_ISSUER_URI: ${COGNITO_ISSUER_URI:-https://cognito-idp.us-east-1.amazonaws.com/us-east-1_vidDVo9o0}
+    ports:
+      - "${PACKIT_API_BIND_ADDRESS:-127.0.0.1}:${PACKIT_HISTORY_API_PORT:-8082}:8082"
+    depends_on:
+      postgres-history:
+        condition: service_healthy
+      rabbit2:
+        condition: service_healthy
+    restart: unless-stopped
+
+  documents:
+    build:
+      context: ../pack-it-flawlessly-documents
+    environment:
+      PORT: 8083
+      DOCUMENTS_DB_URL: jdbc:postgresql://postgres-documents:5432/packit_documents
+      DOCUMENTS_DB_USERNAME: postgres
+      DOCUMENTS_DB_PASSWORD: ${PACKIT_COMPOSE_DB_PASSWORD:?Set PACKIT_COMPOSE_DB_PASSWORD}
+      DOCUMENTS_RABBITMQ_HOST: rabbit1
+      DOCUMENTS_RABBITMQ_USERNAME: ${PACKIT_COMPOSE_RABBIT_USER:?Set PACKIT_COMPOSE_RABBIT_USER}
+      DOCUMENTS_RABBITMQ_PASSWORD: ${PACKIT_COMPOSE_RABBIT_PASSWORD:?Set PACKIT_COMPOSE_RABBIT_PASSWORD}
+      COGNITO_ISSUER_URI: ${COGNITO_ISSUER_URI:-https://cognito-idp.us-east-1.amazonaws.com/us-east-1_vidDVo9o0}
+    ports:
+      - "${PACKIT_API_BIND_ADDRESS:-127.0.0.1}:${PACKIT_DOCUMENTS_API_PORT:-8083}:8083"
+    depends_on:
+      postgres-documents:
+        condition: service_healthy
+      rabbit2:
+        condition: service_healthy
+    restart: unless-stopped
+
+  administrator:
+    build:
+      context: ../pack-it-flawlessly-administrator
+    environment:
+      PORT: 8084
+      ADMIN_RABBITMQ_HOST: rabbit1
+      ADMIN_RABBITMQ_USERNAME: ${PACKIT_COMPOSE_RABBIT_USER:?Set PACKIT_COMPOSE_RABBIT_USER}
+      ADMIN_RABBITMQ_PASSWORD: ${PACKIT_COMPOSE_RABBIT_PASSWORD:?Set PACKIT_COMPOSE_RABBIT_PASSWORD}
+      COGNITO_ISSUER_URI: ${COGNITO_ISSUER_URI:-https://cognito-idp.us-east-1.amazonaws.com/us-east-1_vidDVo9o0}
+    ports:
+      - "127.0.0.1:${PACKIT_ADMIN_API_PORT:-8084}:8084"
+    depends_on:
+      rabbit2:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  rabbit1_data:
+  rabbit2_data:
+  packages_db_data:
+  history_db_data:
+  documents_db_data:
